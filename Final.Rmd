@@ -1,0 +1,277 @@
+---
+title: "MOHS Surgery comments"
+date: "Last Updated: `r format(Sys.time(), '%d, %B, %Y at %H:%M')`"
+author: Juan-Pablo Scarano-Pereira, <br> Francesca Manicone & <br> Alessandro-Martinino
+output: rmdformats::material
+---
+
+
+```{r include=FALSE}
+library(tm)
+library(NLP)
+#library(magrittr)
+#library(slam)
+#library(Rmpfr)
+
+library("magrittr")
+library("text2vec")
+library("tokenizers")
+library(dplyr)
+library(data.table)
+library(readr)
+library("tm")
+library("SnowballC")
+library("wordcloud")
+library("RColorBrewer")
+library(tidyverse)
+library(dplyr)
+library(tibble)
+library(psych)
+library(prettydoc)
+library(flextable)
+library(Gmisc)
+library(adapr)
+library(Hmisc)
+library(kableExtra)
+library(knitr)
+library(prettydoc)
+library(gtsummary)
+library(eeptools)
+library(rstudioapi)
+library(htmlTable)
+library(lubridate)
+library(nnet)
+library(questionr)
+library(sjPlot)
+library(ggpubr)
+library(ggplot2)
+library(gt)
+library(kableExtra)
+```
+
+
+# Preparación de los datos
+
+Antes de iniciar con la realización del modelo hemos procedido a eliminar todos los elementos que pudieran generar ruido en el análisis temático. Primero hemos unido todo el texto de las preguntas, respuestas y explicaciones en un mismo documento, con el fin de facilitar el análisis.
+
+**En caso de que lo que usted quiera sea solo el análisis de las respuestas, por favor no dude en decirnoslo. En este estudio hemos analizado todo, tanto las preguntas, como las entradillas como las respuestas**
+
+```{r include=FALSE}
+MOHS <- read.csv("C:/Users/juanp/Desktop/Research/MOHS/FINALDB.csv")
+
+```
+
+
+# Limpieza del texto inicial
+
+Debido a la naturaleza del análisis, que se basa en palabras y no frases, hemos eliminado los links de páginas web, los números así como los signos de puntuación que no aportan ningún significado.
+
+Más tarde hemos reducido todas las palabras a minúsculas para que no existan diferenicas entre las palabras que comiencen una frase y las que se encuentren en el centro de la frase (En lugar de tener "Casa" y "casa", el sistema entenderá las dos como la palabra "casa" para minimizar los errores). Hemos quitado además los espacios sobrantes entre palabras así como los pronombres y otras palabras que no tienen un significado de interés.
+
+
+
+
+
+```{r include=FALSE}
+
+library(textclean)
+MOHS_clean <- MOHS %>% 
+   mutate(text_clean = ï... %>% 
+             tolower() %>% #lowercase
+             str_replace_all(" haven't ", " have not ")%>%
+             str_replace_all(" mm ", " milimeter ")%>%
+             str_replace_all(" cm ", " centimeter ")%>%
+             str_replace_all(" is ", " be ")%>%
+             str_replace_all(" are ", " be ")%>%
+             str_replace_all(" bccs ", " bcc ")%>%
+             removeWords(stopwords("english")) %>%
+             replace_non_ascii() %>% 
+             replace_html(symbol = F) %>% # remove html tag
+             str_replace_all("[0-9]", " ") %>% 
+             str_replace_all("[-|]", " ") %>% # replace "-" with space
+             replace_symbol() %>%
+             replace_contraction() %>% 
+             replace_word_elongation() %>%  # lengthen shortened word
+             str_replace_all("[[:punct:]]", " ") %>% # remove punctuation
+             str_replace_all(" dr ", " doctor ") %>% 
+             make_plural() %>%
+             str_squish() %>% # remove double whitespace
+             str_trim() # remove whitespace at the start and end of the text
+          )
+
+#write.csv(MOHS_clean, file = "C:/Users/juanp/Desktop/Research/MOHS/Base de datos MOHS.csv")
+
+```
+
+## Tokenización 
+
+Mas tarde llevamos a cabo la separación de las palabras del texto en un proceso denominado tokenización. Cada palabra se denomina a partir de ahora "token".
+
+En nuestro análisis hemos terminado por retirar las palabras que aparecen menos de 10 veces así como las que están presentes en más del 70% de las entradas de la web al ser demasiado frecuentes y generar mucho ruido.
+
+Finalmente creamos una matriz con todas las palabras del documento lista para entrar en el modelo LDA.
+
+```{r include=FALSE}
+
+MOHS_clean<- read_csv("C:/Users/juanp/Desktop/Research/MOHS/Base de datos MOHS.csv")
+
+ tokens = MOHS_clean$text_clean %>%  tokenize_words (strip_numeric = TRUE)
+  it <- itoken(tokens, progressbar = FALSE)
+  
+  v = create_vocabulary(it) %>% 
+    prune_vocabulary(term_count_min = 10, doc_proportion_max = 0.7)
+  vectorizer = vocab_vectorizer(v)
+  
+  dtm = create_dtm(it, vectorizer, type = "dgTMatrix")
+  
+```
+
+
+
+
+
+
+
+
+
+
+
+
+# Análisis LDA
+
+Hemos realizado un análisis de temas por LDA partiendo de 20 temas como se realizó en el artículo que nos envió. Para ello realizamos un modelo de LDA que fue mejorado por un algoritmo diferencial de evolución gracias al paquete DEoptim de R.
+
+Se realizaron 200 itineraciones en una población de tamaño 30. Cada miembro de la población representaba 30 pares diferentes de hiperparámetros alfa y beta del modelo LDA. 
+
+Para cada miembro de la población, se genero un modelo LDA con una muestra aleatoria del 80% del total y fue comprobado calculando la perplejidad con el otro 20% de los datos. 
+
+Finalmente se generó el modelo final con los valores de los hiperparámetros resultantes del algoritmo diferencial de evolución.
+
+```{r eval=FALSE, include=FALSE}
+library(DEoptim)
+library(dplyr)
+library(quanteda)
+library(tokenizers)
+library(text2vec)
+
+
+library(ldatuning)
+
+
+system.time(res <- FindTopicsNumber(dtm,
+                                    topics=c(3:9, seq(10, 100, 10)),
+                                    metrics=c("Griffiths2004", "CaoJuan2009",
+                                              "Arun2010", "Deveaud2014"),
+                                    control=list(seed=42),
+                                    mc.cores=4, verbose=TRUE))
+FindTopicsNumber_plot(res)
+
+```
+
+```{r eval=FALSE, include=FALSE}
+OptimizeLDA <- function(params, dtm) {
+  print(params)
+  print(system.time({
+    sample <- sample.int(nrow(dtm), size=floor(.8 * nrow(dtm)))
+    lda.model <- LDA$new(n_topics=round(params[1]),
+                         doc_topic_prior=params[2],
+                         topic_word_prior=params[3])
+    doc.topic.distr <- lda.model$fit_transform(x=dtm[sample, ], n_iter=1000,
+                                               convergence_tol=0.001,
+                                               ## convergence_tol=0.01,
+                                               n_check_convergence=25,
+                                               progressbar=FALSE, verbose=FALSE)
+    dtm <- dtm[-sample, ]
+    doc.topic.distr <- lda.model$transform(dtm)
+    perp <- perplexity(dtm, lda.model$topic_word_distribution, doc.topic.distr)
+  }))
+  print(perp)
+  perp
+}
+
+system.time({
+  res <- DEoptim(OptimizeLDA, c(20, 0, 0), c(30, 1, 0.1), 
+                 DEoptim.control(strategy=2, itermax=200,NP=30,
+                                 parallelType=1, packages=c("text2vec")),
+                 dtm)
+})
+summary(res)
+```
+
+
+
+
+
+
+```{r include=FALSE}
+set.seed(42)
+lda.model <- LDA$new(n_topics=30, doc_topic_prior=0.79373,
+                     topic_word_prior=0.00216)
+topic.distr <- lda.model$fit_transform(x=dtm, n_iter=1000,
+                                       convergence_tol=0.001,
+                                       n_check_convergence=25,
+                                       progressbar=TRUE)
+
+
+
+
+
+
+
+```
+
+
+## Cálculo de los términos más importantes
+
+Finalmente calculamos el valor phi de cada término dentro del tema. En general, el valor phi hace referencia a la probabilidad a posteriori de que un término forme parte de un tema. Dentro del tema cada palabra tendrá un valor phi distinto de modo que la suma de todos los phi del tema son igual a 1.
+
+En la siguiente tabla lo que hemos realizado ha sido visualizar los 20 términos con los valores phi más elevados de cada tema.
+
+```{r echo=FALSE}
+lda.model$get_top_words(n = 20, lambda = 0.6)
+library(servr)
+lda.model$plot()
+```
+
+
+
+```{r eval=FALSE, include=FALSE, results='asis'}
+news_word_topic<-GetTopTerms(lda_news$phi, 20) %>% 
+   as.data.frame()
+
+library(kableExtra)
+
+kable(news_word_topic, caption = "List of the 20 top terms per topic")%>% kable_styling("striped") %>% scroll_box(width = "100%")
+```
+
+
+```{r eval=FALSE, include=FALSE}
+library(ggwordcloud)
+
+pdf(file = "wordcloud_packages.pdf",   # The directory you want to save the file in
+    width = 4, # The width of the plot in inches
+    height = 4) # The height of the plot in inches
+
+news_word_topic %>% 
+   rownames_to_column("id") %>%
+   mutate(id = as.numeric(id)) %>% 
+   pivot_longer(-id, names_to = "topic", values_to = "term") %>% 
+   ggplot(aes(label = term, size = rev(id), color = topic, alpha = rev(id))) +
+   geom_text_wordcloud(seed = 123) +
+   facet_wrap(~topic, scales = "free") +
+   scale_alpha_continuous(range = c(0.4, 1)) +
+   theme_minimal() +
+   theme(strip.background = element_rect(fill = "firebrick"),
+         strip.text.x = element_text(colour = "white"))
+
+dev.off()
+```
+
+
+# Siguiente paso a realizar en el análisis
+
+Una vez hemos generado estos 30 grupos temáticos es el momento de iniciar la parte más subjetiva de todo el proceso. Intentar reducir los grupos temáticos al mínimo número de grupos posibles. 
+
+En el artículo que nos envió redujeron los 20 temas a 4. Es necesario juntar los grupos redundantes o crear temas que incluyan varios grupos temáticos.
+
+Nosotros por nuestra parte vamos a ir trabajando en este punto durante la semana para hacerle una propuesta.
